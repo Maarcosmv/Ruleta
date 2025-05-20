@@ -12,14 +12,14 @@ interface RouletteWheelProps {
 }
 
 export default function RouletteWheel({ isSpinning, lastResult, onSpinComplete, view }: RouletteWheelProps) {
+  // Estados para animación de giro
   const [rotation, setRotation] = useState(0)
-  const [spinSpeed, setSpinSpeed] = useState(0)
+  const [spinning, setSpinning] = useState(false)
+  const [targetRotation, setTargetRotation] = useState(0)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [canvasSize, setCanvasSize] = useState({ width: 300, height: 300 })
-  const [ballPosition, setBallPosition] = useState({ angle: 0, radius: 0, phase: 0 })
-  const requestRef = useRef<number>()
-  const previousTimeRef = useRef<number>()
+  const requestRef = useRef<number | null>(null)
 
   // Números de la ruleta en orden
   const numbers = [
@@ -53,17 +53,41 @@ export default function RouletteWheel({ isSpinning, lastResult, onSpinComplete, 
     return () => window.removeEventListener("resize", updateCanvasSize)
   }, [])
 
-  // Inicializar la posición de la bola cuando comienza a girar
+  // Iniciar animación de giro cuando isSpinning y lastResult cambian
   useEffect(() => {
-    if (isSpinning) {
-      // Inicializar la bola en una posición aleatoria
-      setBallPosition({
-        angle: Math.random() * Math.PI * 2,
-        radius: 0.85, // Comienza en el borde exterior
-        phase: 0, // Fase inicial
-      })
+    if (isSpinning && lastResult !== null) {
+      const segmentAngle = 360 / numbers.length
+      const resultIndex = numbers.indexOf(lastResult)
+      const centerOfSegment = resultIndex * segmentAngle + segmentAngle / 2
+      const target = 360 - (centerOfSegment % 360) + 5 * 360
+      setTargetRotation(target)
+      setRotation(0)
+      // dispara tu bucle animationFrame
+      setSpinning(true)
     }
-  }, [isSpinning])
+  }, [isSpinning, lastResult])
+
+  // Animar la ruleta
+  useEffect(() => {
+    if (!isSpinning) return;
+    let start: number | null = null;
+    const duration = 4000;
+    const step = (ts: number) => {
+      if (!start) start = ts;
+      const t = Math.min((ts - start) / duration, 1);
+      const eased = 1 - (1 - t) ** 3;
+      setRotation(targetRotation * eased);
+      if (t < 1) {
+        requestRef.current = requestAnimationFrame(step);
+      } else {
+        setSpinning(false); 
+        onSpinComplete();
+        setSpinning(false);
+      }
+    };
+    requestRef.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(requestRef.current!);
+  }, [isSpinning, targetRotation, onSpinComplete]);
 
   // Función para dibujar la ruleta y la bola
   const drawRouletteWheel = (ctx: CanvasRenderingContext2D, centerX: number, centerY: number, radius: number) => {
@@ -233,11 +257,6 @@ export default function RouletteWheel({ isSpinning, lastResult, onSpinComplete, 
     ctx.fillStyle = "#D4AF37"
     ctx.fill()
 
-    // Dibujar la bola
-    if (isSpinning || lastResult !== null) {
-      drawBall(ctx, centerX, centerY, radius)
-    }
-
     // Dibujar reflejo en la ruleta (efecto de brillo)
     ctx.beginPath()
     ctx.ellipse(centerX - radius * 0.3, centerY - radius * 0.3, radius * 0.6, radius * 0.2, Math.PI / 4, 0, 2 * Math.PI)
@@ -252,50 +271,6 @@ export default function RouletteWheel({ isSpinning, lastResult, onSpinComplete, 
     reflectionGradient.addColorStop(0, "rgba(255, 255, 255, 0.2)")
     reflectionGradient.addColorStop(1, "rgba(255, 255, 255, 0)")
     ctx.fillStyle = reflectionGradient
-    ctx.fill()
-  }
-
-  // Función para dibujar la bola
-  const drawBall = (ctx: CanvasRenderingContext2D, centerX: number, centerY: number, radius: number) => {
-    // Calcular la posición de la bola
-    let ballX, ballY
-
-    // Usar la posición actual de la bola, sin importar si está girando o no
-    const ballRadius = radius * ballPosition.radius
-    const ballAngle = ballPosition.angle - (rotation * Math.PI) / 180
-
-    ballX = centerX + ballRadius * Math.cos(ballAngle)
-    ballY = centerY + ballRadius * Math.sin(ballAngle)
-
-    // Tamaño de la bola
-    const ballSize = radius * 0.04
-
-    // Dibujar sombra de la bola
-    ctx.beginPath()
-    ctx.arc(ballX + 2, ballY + 2, ballSize, 0, 2 * Math.PI)
-    ctx.fillStyle = "rgba(0, 0, 0, 0.3)"
-    ctx.fill()
-
-    // Dibujar la bola con efecto metálico
-    const ballGradient = ctx.createRadialGradient(ballX - ballSize / 2, ballY - ballSize / 2, 0, ballX, ballY, ballSize)
-    ballGradient.addColorStop(0, "#FFFFFF") // Blanco brillante
-    ballGradient.addColorStop(0.3, "#F0F0F0") // Blanco
-    ballGradient.addColorStop(1, "#D0D0D0") // Gris claro
-
-    ctx.beginPath()
-    ctx.arc(ballX, ballY, ballSize, 0, 2 * Math.PI)
-    ctx.fillStyle = ballGradient
-    ctx.fill()
-
-    // Borde de la bola
-    ctx.strokeStyle = "#999"
-    ctx.lineWidth = 0.5
-    ctx.stroke()
-
-    // Añadir brillo a la bola
-    ctx.beginPath()
-    ctx.arc(ballX - ballSize / 3, ballY - ballSize / 3, ballSize / 3, 0, 2 * Math.PI)
-    ctx.fillStyle = "rgba(255, 255, 255, 0.8)"
     ctx.fill()
   }
 
@@ -326,203 +301,31 @@ export default function RouletteWheel({ isSpinning, lastResult, onSpinComplete, 
     }, 16) // Aproximadamente 60 FPS
 
     return () => clearInterval(intervalId)
-  }, [rotation, isSpinning, lastResult, numbers, canvasSize, ballPosition])
-
-  // Animación de la bola
-  const animateBall = (time: number) => {
-    if (previousTimeRef.current === undefined) {
-      previousTimeRef.current = time
-    }
-
-    const deltaTime = time - previousTimeRef.current
-    previousTimeRef.current = time
-
-    if (isSpinning) {
-      setBallPosition((prev) => {
-        let newAngle = prev.angle
-        let newRadius = prev.radius
-        let newPhase = prev.phase
-
-        // Velocidad angular base
-        const baseAngularVelocity = 0.004
-
-        if (prev.phase < 1) {
-          // Fase inicial: giro rápido
-          const angularVelocity = baseAngularVelocity * (1 + 0.1 * Math.sin(time * 0.001))
-          newAngle = prev.angle + deltaTime * angularVelocity
-          newRadius = 0.85
-          newPhase = Math.min(1, prev.phase + deltaTime * 0.0002)
-        } else if (prev.phase < 2) {
-          // Fase de desaceleración
-          const angularVelocity = baseAngularVelocity * 0.6
-          newAngle = prev.angle + deltaTime * angularVelocity
-          newRadius = 0.85 - (prev.phase - 1) * 0.1
-          newPhase = Math.min(2, prev.phase + deltaTime * 0.00015)
-        } else if (prev.phase < 3) {
-          // Fase de rebote
-          const angularVelocity = baseAngularVelocity * 0.2
-          newAngle = prev.angle + deltaTime * angularVelocity
-          const bounceAmplitude = 0.03 * (1 - (prev.phase - 2))
-          newRadius = 0.75 + bounceAmplitude * Math.sin(time * 0.03)
-          newPhase = Math.min(3, prev.phase + deltaTime * 0.00008)
-        } else {
-          // Fase final: asentamiento
-          const segmentAngle = (2 * Math.PI) / numbers.length
-          const normalizedAngle = ((prev.angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
-          const segmentIndex = Math.floor(normalizedAngle / segmentAngle)
-          const finalAngle = segmentIndex * segmentAngle + segmentAngle / 2
-
-          // Suavizar la transición al ángulo final
-          const angleDiff = ((finalAngle - prev.angle + Math.PI) % (2 * Math.PI)) - Math.PI
-          newAngle = prev.angle + angleDiff * 0.1
-          newRadius = 0.75
-          newPhase = Math.min(4, prev.phase + deltaTime * 0.00005)
-
-          if (newPhase >= 4 && prev.phase < 4) {
-            newAngle = finalAngle
-            if (onSpinComplete) {
-              onSpinComplete()
-            }
-          }
-        }
-
-        return {
-          angle: newAngle,
-          radius: newRadius,
-          phase: newPhase,
-        }
-      })
-    }
-
-    requestRef.current = requestAnimationFrame(animateBall)
-  }
-
-  // Iniciar y detener la animación de la bola
-  useEffect(() => {
-    if (isSpinning) {
-      requestRef.current = requestAnimationFrame(animateBall)
-    }
-
-    return () => {
-      if (requestRef.current) {
-        cancelAnimationFrame(requestRef.current)
-      }
-    }
-  }, [isSpinning])
-
-  // Asegurar que la bola se posicione correctamente cuando termina el giro
-  // Eliminar el efecto que fuerza la posición de la bola al resultado predeterminado
-  // Eliminar o comentar este useEffect:
-  /*
-  useEffect(() => {
-    // Solo actualizar la posición cuando cambia de spinning a no spinning
-    // y tenemos un resultado
-    if (!isSpinning && lastResult !== null) {
-      // Usar una referencia para evitar actualizaciones innecesarias
-      const resultIndex = numbers.indexOf(lastResult)
-      if (resultIndex !== -1) {
-        const segmentAngle = (2 * Math.PI) / numbers.length
-        const finalAngle = resultIndex * segmentAngle + segmentAngle / 2
-
-        // Verificar si la posición actual es diferente para evitar actualizaciones innecesarias
-        if (
-          Math.abs(ballPosition.angle - finalAngle) > 0.01 ||
-          Math.abs(ballPosition.radius - 0.75) > 0.01 ||
-          ballPosition.phase !== 2
-        ) {
-          // Establecer la posición final de la bola
-          setBallPosition({
-            angle: finalAngle,
-            radius: 0.75,
-            phase: 2, // Fase final
-          })
-        }
-      }
-    }
-  }, [isSpinning, lastResult])
-  */
-
-  // Manejar animación de giro de la ruleta
-  useEffect(() => {
-    let animationId: number
-    let startTime: number | null = null
-    const spinDuration = 5000 // 5 segundos de giro
-
-    const animate = (timestamp: number) => {
-      if (!startTime) startTime = timestamp
-      const elapsed = timestamp - startTime
-
-      // Calcular la velocidad y rotación basadas en el tiempo transcurrido
-      if (isSpinning) {
-        // Fase inicial: aceleración
-        if (elapsed < 500) {
-          setSpinSpeed(40 * (elapsed / 500))
-        }
-        // Fase media: velocidad constante
-        else if (elapsed < 3000) {
-          setSpinSpeed(40)
-        }
-        // Fase final: desaceleración
-        else if (elapsed < spinDuration) {
-          const remaining = spinDuration - elapsed
-          setSpinSpeed(40 * (remaining / 2000))
-        }
-        // Finalizar giro
-        else {
-          setSpinSpeed(0)
-
-          // Determinar el resultado basado en la posición final de la bola
-          const segmentAngle = (2 * Math.PI) / numbers.length
-          const normalizedAngle = ((ballPosition.angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
-          const segmentIndex = Math.floor(normalizedAngle / segmentAngle)
-          const resultNumber = numbers[segmentIndex % numbers.length]
-
-          // Actualizar el estado del componente padre con el resultado
-          if (onSpinComplete) {
-            // Idealmente, deberíamos pasar el resultado al componente padre
-            onSpinComplete()
-          }
-
-          return
-        }
-
-        // Actualizar rotación
-        setRotation((prev) => (prev + spinSpeed) % 360)
-      }
-
-      animationId = requestAnimationFrame(animate)
-    }
-
-    if (isSpinning) {
-      startTime = null
-      animationId = requestAnimationFrame(animate)
-    }
-
-    return () => {
-      if (animationId) cancelAnimationFrame(animationId)
-    }
-  }, [isSpinning, spinSpeed, onSpinComplete, ballPosition.angle, numbers])
+  }, [rotation, isSpinning, lastResult, numbers, canvasSize])
 
   return (
     <div className="relative w-full aspect-square" ref={containerRef}>
-      <div
-        className="w-full h-full rounded-full overflow-hidden shadow-lg relative"
+      <div className="w-full h-full rounded-full overflow-hidden shadow-lg relative"
         style={{
           boxShadow: "0 0 30px rgba(255, 215, 0, 0.3), 0 0 15px rgba(0, 0, 0, 0.5)",
         }}
       >
         {/* Canvas para dibujar la ruleta */}
         <canvas ref={canvasRef} width={canvasSize.width} height={canvasSize.height} className="w-full h-full" />
-
         {/* Decoración central */}
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-gradient-to-r from-yellow-600 to-amber-700 z-20 flex items-center justify-center">
           <div className="w-6 h-6 rounded-full bg-gradient-to-r from-yellow-400 to-amber-500 flex items-center justify-center">
             <Sparkles className="text-amber-900" size={12} />
           </div>
         </div>
+        {/* Flecha fija a la derecha */}
+        <div className="absolute top-1/2 right-0 transform -translate-y-1/2 z-30">
+          <svg width="32" height="32" viewBox="0 0 32 32">
+            <polygon points="0,16 32,8 32,24" fill="#ffffff" stroke="#afafaf" strokeWidth="2" />
+          </svg>
+        </div>
       </div>
-
-      {isSpinning && (
+      {spinning && (
         <div className="absolute inset-0 flex items-center justify-center z-30">
           <div className="text-sm font-bold text-white bg-black bg-opacity-70 px-3 py-1 rounded-full flex items-center gap-1 shadow-lg">
             <Sparkles className="animate-spin text-yellow-400" size={14} />
@@ -530,8 +333,7 @@ export default function RouletteWheel({ isSpinning, lastResult, onSpinComplete, 
           </div>
         </div>
       )}
-
-      {!isSpinning && lastResult !== null && (
+      {!spinning && lastResult !== null && (
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 bg-black bg-opacity-70 px-3 py-1.5 rounded-full shadow-lg animate-pulse">
           <span className="text-sm text-white font-bold flex items-center gap-1">
             <Sparkles className="text-yellow-400" size={14} />
