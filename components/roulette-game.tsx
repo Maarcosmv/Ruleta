@@ -103,6 +103,8 @@ export default function RouletteGame() {
   const spinWheel = async () => {
     if (isSpinning || bets.length === 0) return
 
+    const result = Math.floor(Math.random() * 37) as RouletteNumber // 0-36
+    setLastResult(result)
     setIsSpinning(true)
     setWinAmount(null)
 
@@ -115,8 +117,6 @@ export default function RouletteGame() {
     await new Promise<void>((resolve) => {
       const handleSpinComplete = () => {
         // Determinar el resultado basado en la posición final de la bola
-        const result = Math.floor(Math.random() * 37) // 0-36
-        setLastResult(result)
 
         // Actualizar historial
         const newHistory = [result, ...resultsHistory].slice(0, 10)
